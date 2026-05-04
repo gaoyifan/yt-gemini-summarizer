@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube → Gemini Summarizer",
+  "version": "0.2.0",
+  "description": "右键 YouTube 视频链接，调用 Gemini（Fast 模型）总结视频内容。",
+  "permissions": ["contextMenus", "storage", "activeTab", "scripting"],
+  "host_permissions": ["https://gemini.google.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
