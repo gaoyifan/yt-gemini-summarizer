@@ -36,38 +36,9 @@ function youtubeUrl(raw) {
   return raw;
 }
 
-async function isLoggedIn() {
-  const cookies = await chrome.cookies.getAll({
-    url: "https://accounts.google.com/"
-  });
-  return cookies.some((cookie) =>
-    ["SID", "__Secure-1PSID", "__Secure-3PSID"].includes(cookie.name)
-  );
-}
-
-async function notifyLoginRequired(tabId) {
-  if (typeof tabId !== "number") return;
-  await chrome.scripting
-    .executeScript({
-      target: { tabId },
-      func: () =>
-        alert(
-          "请先在浏览器里登录 Gemini（https://gemini.google.com）后再使用此功能。"
-        )
-    })
-    .catch(() => {});
-}
-
-const hooks = { isLoggedIn };
-
-async function handleMenuClick(info, tab) {
+async function handleMenuClick(info) {
   const url = youtubeUrl(info.linkUrl || info.pageUrl || "");
   if (!url) return null;
-
-  if (!(await hooks.isLoggedIn())) {
-    await notifyLoginRequired(tab && tab.id);
-    return { needsLogin: true };
-  }
 
   const newTab = await chrome.tabs.create({ url: GEMINI_URL, active: false });
   const prompt = `总结视频 ${url}`;
@@ -76,13 +47,7 @@ async function handleMenuClick(info, tab) {
 }
 
 self.__yt2gTest = {
-  handleMenuClick,
-  setLoggedInForTest(value) {
-    hooks.isLoggedIn = async () => value;
-  },
-  resetHooks() {
-    hooks.isLoggedIn = isLoggedIn;
-  }
+  handleMenuClick
 };
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
