@@ -1,4 +1,5 @@
 const GEMINI_URL = "https://gemini.google.com/app";
+const PROMPT_PREFIX = "prompt:";
 const YT_URL_PATTERNS = [
   "*://*.youtube.com/watch*",
   "*://*.youtube.com/shorts/*",
@@ -36,20 +37,12 @@ function youtubeUrl(raw) {
 }
 
 async function isLoggedIn() {
-  try {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 6000);
-    const res = await fetch(GEMINI_URL, {
-      credentials: "include",
-      redirect: "follow",
-      cache: "no-store",
-      signal: ctl.signal
-    });
-    clearTimeout(timer);
-    return !/accounts\.google\.com|\/signin/i.test(res.url);
-  } catch {
-    return true;
-  }
+  const cookies = await chrome.cookies.getAll({
+    url: "https://accounts.google.com/"
+  });
+  return cookies.some((cookie) =>
+    ["SID", "__Secure-1PSID", "__Secure-3PSID"].includes(cookie.name)
+  );
 }
 
 async function notifyLoginRequired(tabId) {
@@ -65,24 +58,32 @@ async function notifyLoginRequired(tabId) {
     .catch(() => {});
 }
 
+const hooks = { isLoggedIn };
+
 async function handleMenuClick(info, tab) {
   const url = youtubeUrl(info.linkUrl || info.pageUrl || "");
   if (!url) return null;
 
-  if (!(await isLoggedIn())) {
+  if (!(await hooks.isLoggedIn())) {
     await notifyLoginRequired(tab && tab.id);
     return { needsLogin: true };
   }
 
   const newTab = await chrome.tabs.create({ url: GEMINI_URL, active: false });
   const prompt = `总结视频 ${url}`;
-  await chrome.storage.session.set({ [`prompt:${newTab.id}`]: prompt });
+  await chrome.storage.session.set({ [`${PROMPT_PREFIX}${newTab.id}`]: prompt });
   return { tabId: newTab.id, prompt };
 }
 
-// Exposed on `self` so the e2e test can invoke / stub them in the SW context.
-self.handleMenuClick = handleMenuClick;
-self.isLoggedIn = isLoggedIn;
+self.__yt2gTest = {
+  handleMenuClick,
+  setLoggedInForTest(value) {
+    hooks.isLoggedIn = async () => value;
+  },
+  resetHooks() {
+    hooks.isLoggedIn = isLoggedIn;
+  }
+};
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   handleMenuClick(info, tab).catch((e) =>
@@ -92,7 +93,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== "consumePrompt" || !sender.tab) return undefined;
-  const key = `prompt:${sender.tab.id}`;
+  const key = `${PROMPT_PREFIX}${sender.tab.id}`;
   chrome.storage.session
     .get(key)
     .then((data) => {

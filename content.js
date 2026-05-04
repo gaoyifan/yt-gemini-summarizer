@@ -30,33 +30,18 @@
   // ---------- helpers ----------
 
   function findEditor() {
-    return (
-      document.querySelector('div.ql-editor[contenteditable="true"]') ||
-      document.querySelector('rich-textarea div[contenteditable="true"]')
-    );
+    return document.querySelector('div.ql-editor[contenteditable="true"]');
   }
 
   function findSendButton() {
-    const usable = (b) =>
-      b &&
-      !b.disabled &&
-      b.getAttribute("aria-disabled") !== "true" &&
-      b.offsetParent;
-    const byClass = document.querySelector("button.send-button");
-    if (usable(byClass)) return byClass;
-    for (const b of document.querySelectorAll("button[aria-label]")) {
-      if (!usable(b)) continue;
-      const l = (b.getAttribute("aria-label") || "").trim().toLowerCase();
-      if (
-        l === "send message" ||
-        l === "send" ||
-        l === "发送" ||
-        l === "发送消息" ||
-        l === "傳送" ||
-        l === "傳送訊息"
-      ) {
-        return b;
-      }
+    const btn = document.querySelector("button.send-button");
+    if (
+      btn &&
+      !btn.disabled &&
+      btn.getAttribute("aria-disabled") !== "true" &&
+      btn.offsetParent
+    ) {
+      return btn;
     }
     return null;
   }
@@ -83,14 +68,11 @@
   }
 
   function isSubmitted(text) {
-    const ed = findEditor();
-    const editorEmpty = !ed || (ed.textContent || "").trim() === "";
-    const bubble = Array.from(
+    return Array.from(
       document.querySelectorAll(
         "user-query-content, .user-query-bubble-with-background, .query-text"
       )
     ).some((el) => (el.textContent || "").includes(text));
-    return bubble || editorEmpty;
   }
 
   async function selectFastModel() {
