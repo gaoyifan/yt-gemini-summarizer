@@ -97,14 +97,24 @@
   }
 
   function findModelTrigger() {
-    const cands = document.querySelectorAll(
-      'bard-mode-switcher button, button[aria-haspopup="menu"], button[aria-haspopup="listbox"]'
+    const stable = firstVisible(
+      'button[data-test-id="bard-mode-menu-button"]'
     );
+    if (stable) return stable;
+
+    const cands = Array.from(
+      document.querySelectorAll(
+        'bard-mode-switcher button[aria-haspopup="menu"], bard-mode-switcher button[aria-haspopup="listbox"], button[aria-label*="模式选择器"], button[aria-label*="mode"]'
+      )
+    ).filter(isVisible);
+
+    const nearInput = cands.find((b) =>
+      b.closest(".model-picker-container, .input-area, rich-textarea")
+    );
+    if (nearInput) return nearInput;
+
     for (const b of cands) {
-      if (
-        b.offsetParent &&
-        /Fast|快速|Pro|Flash|Thinking/.test((b.textContent || "").trim())
-      ) {
+      if (/Fast|快速|Pro|Flash|Thinking/i.test(normalText(b))) {
         return b;
       }
     }
@@ -112,14 +122,43 @@
   }
 
   function findFastOption() {
+    const exact = firstVisible(
+      '[data-test-id="bard-mode-option-快速"], [data-test-id="bard-mode-option-Fast"]'
+    );
+    if (exact) return exact;
+
+    for (const title of document.querySelectorAll(".cdk-overlay-container .mode-title")) {
+      const t = normalText(title);
+      if (t === "快速" || /^Fast$/i.test(t)) {
+        const option = title.closest('[role="menuitem"], [role="option"], button');
+        if (isVisible(option)) return option;
+      }
+    }
+
     const opts = document.querySelectorAll(
-      '[role="menuitem"], [role="option"], mat-option, button'
+      '.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="option"], .cdk-overlay-container mat-option, .cdk-overlay-container button'
     );
     for (const o of opts) {
-      const t = (o.textContent || "").trim();
-      if (o.offsetParent && /^(Fast|快速)\b/.test(t)) return o;
+      const t = normalText(o);
+      if (isVisible(o) && (t === "快速" || /^Fast(?:\s|$)/i.test(t))) return o;
     }
     return null;
+  }
+
+  function firstVisible(selector) {
+    return Array.from(document.querySelectorAll(selector)).find(isVisible) || null;
+  }
+
+  function isVisible(el) {
+    return Boolean(
+      el &&
+        el.getClientRects().length &&
+        getComputedStyle(el).visibility !== "hidden"
+    );
+  }
+
+  function normalText(el) {
+    return (el.textContent || "").replace(/\s+/g, " ").trim();
   }
 
   function sleep(ms) {
