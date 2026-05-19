@@ -1,7 +1,8 @@
 /* End-to-end test for the YouTube -> Gemini extension.
  *
  * The extension no longer checks Gemini login state. The test verifies the core
- * flow only: background opens Gemini, content.js selects Fast, submits prompt,
+ * flow only: background opens Gemini, content.js selects the fast model,
+ * submits prompt,
  * and the prompt appears as a user message.
  */
 
@@ -128,10 +129,10 @@ async function runHappyPath(sw, context) {
 
   const model = await currentModelLabel(page);
   log("当前模型选择器文本:", model || "(读不到)");
-  if (!model || !/Fast|快速/i.test(model)) {
-    throw new Error(`提交时模型不是 Fast，实际为: ${model || "(读不到)"}`);
+  if (!model || !/Fast|快速|Flash/i.test(model)) {
+    throw new Error(`提交时模型不是快速/Flash，实际为: ${model || "(读不到)"}`);
   }
-  log("端到端测试通过：prompt 已提交，模型为 Fast。");
+  log("端到端测试通过：prompt 已提交，模型为快速/Flash。");
 }
 
 async function waitForUserBubble(page, prompt) {

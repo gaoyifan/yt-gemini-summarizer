@@ -34,14 +34,15 @@
   }
 
   function findSendButton() {
-    const btn = document.querySelector("button.send-button");
-    if (
-      btn &&
-      !btn.disabled &&
-      btn.getAttribute("aria-disabled") !== "true" &&
-      btn.offsetParent
-    ) {
-      return btn;
+    const selectors = [
+      "button.send-button",
+      'gem-icon-button.send-button button',
+      'button[aria-label="发送"]',
+      'button[aria-label="Send"]'
+    ];
+    for (const selector of selectors) {
+      const btn = firstVisible(selector);
+      if (btn && !isDisabled(btn)) return btn;
     }
     return null;
   }
@@ -53,11 +54,18 @@
     const range = document.createRange();
     range.selectNodeContents(el);
     sel.addRange(range);
-    if (document.execCommand("insertText", false, text)) return;
+    if (document.execCommand("insertText", false, text)) {
+      fireTextInput(el, text);
+      return;
+    }
     el.innerHTML = "";
     const p = document.createElement("p");
     p.textContent = text;
     el.appendChild(p);
+    fireTextInput(el, text);
+  }
+
+  function fireTextInput(el, text) {
     el.dispatchEvent(
       new InputEvent("input", {
         bubbles: true,
@@ -65,6 +73,7 @@
         data: text
       })
     );
+    el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   function isSubmitted(text) {
@@ -78,17 +87,17 @@
   async function selectFastModel() {
     const trigger = await waitFor(findModelTrigger, 8000);
     if (!trigger) return log("没找到模型选择器，沿用默认。");
-    if (/Fast|快速/i.test((trigger.textContent || "").trim())) {
-      return log("已是 Fast 模型，跳过切换。");
+    if (/Fast|快速|Flash/i.test((trigger.textContent || "").trim())) {
+      return log("已是快速/Flash 模型，跳过切换。");
     }
     trigger.click();
     await sleep(250);
     const opt = await waitFor(findFastOption, 3000);
     if (opt) {
       opt.click();
-      log("已切换到 Fast 模型。");
+      log("已切换到快速/Flash 模型。");
     } else {
-      log("打开了模型菜单但找不到 Fast 选项，沿用默认。");
+      log("打开了模型菜单但找不到快速/Flash 选项，沿用默认。");
       document.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
       );
@@ -127,6 +136,18 @@
     );
     if (exact) return exact;
 
+    const menuItems = Array.from(
+      document.querySelectorAll(
+        '.cdk-overlay-container gem-menu-item[role="menuitem"], .cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="option"]'
+      )
+    ).filter((o) => isVisible(o) && !isDisabled(o));
+
+    const flashLite = menuItems.find((o) => {
+      const t = normalText(o);
+      return /Flash-Lite|极速回答/i.test(t);
+    });
+    if (flashLite) return flashLite;
+
     for (const title of document.querySelectorAll(".cdk-overlay-container .mode-title")) {
       const t = normalText(title);
       if (t === "快速" || /^Fast$/i.test(t)) {
@@ -135,12 +156,19 @@
       }
     }
 
-    const opts = document.querySelectorAll(
-      '.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="option"], .cdk-overlay-container mat-option, .cdk-overlay-container button'
-    );
+    const opts = menuItems.length
+      ? menuItems
+      : document.querySelectorAll(
+          '.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="option"], .cdk-overlay-container mat-option, .cdk-overlay-container button'
+        );
     for (const o of opts) {
       const t = normalText(o);
-      if (isVisible(o) && (t === "快速" || /^Fast(?:\s|$)/i.test(t))) return o;
+      if (
+        isVisible(o) &&
+        (t === "快速" || /^Fast(?:\s|$)/i.test(t) || /\bFlash\b/i.test(t))
+      ) {
+        return o;
+      }
     }
     return null;
   }
@@ -154,6 +182,15 @@
       el &&
         el.getClientRects().length &&
         getComputedStyle(el).visibility !== "hidden"
+    );
+  }
+
+  function isDisabled(el) {
+    return Boolean(
+      el &&
+        (el.disabled ||
+          el.getAttribute("aria-disabled") === "true" ||
+          el.closest('[aria-disabled="true"]'))
     );
   }
 
