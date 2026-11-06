@@ -3,6 +3,8 @@
   window.__yt2gInjected = true;
 
   const log = (...a) => console.log("[YouTube → Gemini]", ...a);
+  // 匹配 "Flash"，但不匹配 "Flash-Lite"。
+  const PLAIN_FLASH_RE = /\bFlash\b(?!-)/i;
 
   let prompt = null;
   try {
@@ -87,15 +89,16 @@
   async function selectFastModel() {
     const trigger = await waitFor(findModelTrigger, 8000);
     if (!trigger) return log("没找到模型选择器，沿用默认。");
-    if (/Fast|快速|Flash/i.test((trigger.textContent || "").trim())) {
-      return log("已是快速/Flash 模型，跳过切换。");
+    const current = normalText(trigger);
+    if (PLAIN_FLASH_RE.test(current) || /^(?:快速|Fast)(?:\s|$)/i.test(current)) {
+      return log("已是 Flash 模型，跳过切换。");
     }
     trigger.click();
     await sleep(250);
     const opt = await waitFor(findFastOption, 3000);
     if (opt) {
       opt.click();
-      log("已切换到快速/Flash 模型。");
+      log("已切换到 Flash（或备选 Flash-Lite）模型。");
     } else {
       log("打开了模型菜单但找不到快速/Flash 选项，沿用默认。");
       document.dispatchEvent(
@@ -134,43 +137,33 @@
     const exact = firstVisible(
       '[data-test-id="bard-mode-option-快速"], [data-test-id="bard-mode-option-Fast"]'
     );
-    if (exact) return exact;
+    if (exact && !isDisabled(exact)) return exact;
 
+    // 菜单不一定在 .cdk-overlay-container 里（新版在 bard-mode-switcher 内的
+    // .cdk-overlay-popover 中），所以直接在整个文档里找菜单项。
     const menuItems = Array.from(
       document.querySelectorAll(
-        '.cdk-overlay-container gem-menu-item[role="menuitem"], .cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="option"]'
+        '[role="menuitemradio"], [role="menuitem"], [role="option"], mat-option'
       )
-    ).filter((o) => isVisible(o) && !isDisabled(o));
-
-    const flashLite = menuItems.find((o) => {
-      const t = normalText(o);
-      return /Flash-Lite|极速回答/i.test(t);
-    });
-    if (flashLite) return flashLite;
-
-    for (const title of document.querySelectorAll(".cdk-overlay-container .mode-title")) {
-      const t = normalText(title);
-      if (t === "快速" || /^Fast$/i.test(t)) {
-        const option = title.closest('[role="menuitem"], [role="option"], button');
-        if (isVisible(option)) return option;
-      }
-    }
-
-    const opts = menuItems.length
-      ? menuItems
-      : document.querySelectorAll(
-          '.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="option"], .cdk-overlay-container mat-option, .cdk-overlay-container button'
-        );
-    for (const o of opts) {
-      const t = normalText(o);
-      if (
+    ).filter(
+      (o) =>
         isVisible(o) &&
-        (t === "快速" || /^Fast(?:\s|$)/i.test(t) || /\bFlash\b/i.test(t))
-      ) {
-        return o;
-      }
-    }
-    return null;
+        !isDisabled(o) &&
+        !/sign-in/i.test(o.getAttribute("data-test-id") || "") &&
+        (o.closest(
+          ".cdk-overlay-container, .cdk-overlay-popover, .cdk-overlay-pane, bard-mode-switcher"
+        ) ||
+          /^bard-mode-option/.test(o.getAttribute("data-test-id") || ""))
+    );
+
+    const match = (re) => menuItems.find((o) => re.test(normalText(o)));
+    // 优先 Flash，备选 Flash-Lite，最后旧版的“快速/Fast”。
+    return (
+      match(PLAIN_FLASH_RE) ||
+      match(/Flash-Lite|极速回答/i) ||
+      match(/^(?:快速|Fast)(?:\s|$)/i) ||
+      null
+    );
   }
 
   function firstVisible(selector) {
