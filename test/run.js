@@ -1,7 +1,8 @@
 /* End-to-end test for the YouTube -> Gemini extension.
  *
  * The extension no longer checks Gemini login state. The test verifies the core
- * flow only: background opens Gemini, content.js selects the fast model,
+ * flow only: background opens Gemini, content.js selects Flash (or Flash-Lite
+ * when Flash is locked),
  * submits prompt,
  * and the prompt appears as a user message.
  */
@@ -22,6 +23,8 @@ const EXPECTED_URL = TEST_VIDEO.startsWith("https://youtu.be/")
     ).split(/[?#]/)[0]}`
   : TEST_VIDEO;
 const EXPECTED_PROMPT = `总结视频 ${EXPECTED_URL}`;
+// 偏好 Flash；Flash 被锁定（未登录）时退回 Flash-Lite。Pro / Argon 等一律不接受。
+const ACCEPTED_MODEL = /Flash/i;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...args) => console.log("[test]", ...args);
@@ -115,9 +118,12 @@ async function runHappyPath(sw, context) {
   log("handleMenuClick 返回:", JSON.stringify(result.result));
 
   const page = await pagePromise;
+  const extensionLogs = [];
   page.on("console", (msg) => {
     const text = msg.text();
-    if (text.includes("YouTube → Gemini")) log("[gemini-tab]", msg.type(), text);
+    if (!text.includes("YouTube → Gemini")) return;
+    extensionLogs.push(text);
+    log("[gemini-tab]", msg.type(), text);
   });
   await page.waitForLoadState("domcontentloaded", { timeout: 60000 });
 
@@ -127,12 +133,20 @@ async function runHappyPath(sw, context) {
   log("截图保存到", screenshotPath);
   if (!submitted) throw new Error("未观察到真实 user-query 气泡。");
 
-  const model = await currentModelLabel(page);
-  log("当前模型选择器文本:", model || "(读不到)");
-  if (!model || !/Fast|快速|Flash/i.test(model)) {
-    throw new Error(`提交时模型不是快速/Flash，实际为: ${model || "(读不到)"}`);
+  // 内容脚本必须明确报告“已是目标模型/已切换到”，不能是“没找到…沿用默认”。
+  const fallback = extensionLogs.find((t) => t.includes("沿用默认"));
+  if (fallback) throw new Error(`内容脚本没能选中模型: ${fallback}`);
+  if (!extensionLogs.some((t) => /已(是目标模型|切换到)/.test(t))) {
+    throw new Error("内容脚本没有报告选中模型。");
   }
-  log("端到端测试通过：prompt 已提交，模型为快速/Flash。");
+
+  // 再独立核对页面上的真实状态：选择器的 aria-label 形如 “…currently Flash-Lite”。
+  const model = await currentModelLabel(page);
+  log("当前模型选择器:", model || "(读不到)");
+  if (!model || !ACCEPTED_MODEL.test(model)) {
+    throw new Error(`提交时模型不是 Flash / Flash-Lite，实际为: ${model || "(读不到)"}`);
+  }
+  log("端到端测试通过：prompt 已提交，模型为 Flash 系列。");
 }
 
 async function waitForUserBubble(page, prompt) {
@@ -159,15 +173,11 @@ async function waitForUserBubble(page, prompt) {
 async function currentModelLabel(page) {
   return page
     .evaluate(() => {
-      for (const btn of document.querySelectorAll(
-        'bard-mode-switcher button, button[aria-haspopup="menu"], button[aria-haspopup="listbox"]'
-      )) {
-        const text = (btn.textContent || "").trim();
-        if (btn.offsetParent && /Fast|快速|Pro|Flash|Thinking/i.test(text)) {
-          return text;
-        }
-      }
-      return null;
+      const btn = Array.from(
+        document.querySelectorAll('button[data-test-id="bard-mode-menu-button"]')
+      ).find((b) => b.getClientRects().length);
+      if (!btn) return null;
+      return `${btn.getAttribute("aria-label") || ""} | ${(btn.textContent || "").trim()}`;
     })
     .catch(() => null);
 }

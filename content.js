@@ -4,6 +4,14 @@
 
   const log = (...a) => console.log("[YouTube → Gemini]", ...a);
 
+  // 模型偏好，按优先级：先 Flash，Flash 不可用（比如未登录时被锁定）才退回 Flash-Lite，
+  // 最后是旧版 UI 里的 “快速 / Fast”。注意 “Flash-Lite” 也包含 “Flash”，所以第一项要排除它。
+  const MODEL_PREFERENCE = [
+    /\bFlash\b(?!-Lite)/i,
+    /Flash-Lite|Fastest|极速|極速/i,
+    /^(?:快速|Fast)/i
+  ];
+
   let prompt = null;
   try {
     const res = await chrome.runtime.sendMessage({ type: "consumePrompt" });
@@ -12,7 +20,7 @@
   if (!prompt) return;
   log("准备发送:", prompt);
 
-  await selectFastModel();
+  await selectModel();
 
   const editor = await waitFor(findEditor, 30000);
   if (!editor) return log("未在 30s 内找到 Gemini 输入框。");
@@ -84,91 +92,52 @@
     ).some((el) => (el.textContent || "").includes(text));
   }
 
-  async function selectFastModel() {
-    const trigger = await waitFor(findModelTrigger, 8000);
+  // 打开模型菜单，按 MODEL_PREFERENCE 点选一项。是否已选中看菜单项自己的 aria-checked。
+  async function selectModel() {
+    // 实测选择器通常 3–6 秒出现，约 1/12 的加载要 10–12 秒，所以给足 20 秒。
+    const trigger = await waitFor(findModelTrigger, 20000);
     if (!trigger) return log("没找到模型选择器，沿用默认。");
-    if (/Fast|快速|Flash/i.test((trigger.textContent || "").trim())) {
-      return log("已是快速/Flash 模型，跳过切换。");
-    }
+
     trigger.click();
-    await sleep(250);
-    const opt = await waitFor(findFastOption, 3000);
-    if (opt) {
-      opt.click();
-      log("已切换到快速/Flash 模型。");
-    } else {
-      log("打开了模型菜单但找不到快速/Flash 选项，沿用默认。");
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
-      );
+    await waitFor(findModelItems, 3000);
+    await sleep(250); // 等菜单项的锁定/可用状态渲染完，再决定选哪个
+    const target = choosePreferred(findModelItems() || []);
+    if (!target) {
+      log("打开了模型菜单但找不到可用的 Flash / Flash-Lite 选项，沿用默认。");
+      trigger.click(); // 再点一次收起菜单
+      return;
     }
+
+    const alreadySelected = target.getAttribute("aria-checked") === "true";
+    target.click(); // 点已选中的项也会收起菜单
+    log(alreadySelected ? "已是目标模型:" : "已切换到:", normalText(target));
     await sleep(250);
   }
 
   function findModelTrigger() {
-    const stable = firstVisible(
-      'button[data-test-id="bard-mode-menu-button"]'
+    return firstVisible(
+      'button[data-test-id="bard-mode-menu-button"], bard-mode-switcher button[aria-haspopup]'
     );
-    if (stable) return stable;
-
-    const cands = Array.from(
-      document.querySelectorAll(
-        'bard-mode-switcher button[aria-haspopup="menu"], bard-mode-switcher button[aria-haspopup="listbox"], button[aria-label*="模式选择器"], button[aria-label*="mode"]'
-      )
-    ).filter(isVisible);
-
-    const nearInput = cands.find((b) =>
-      b.closest(".model-picker-container, .input-area, rich-textarea")
-    );
-    if (nearInput) return nearInput;
-
-    for (const b of cands) {
-      if (/Fast|快速|Pro|Flash|Thinking/i.test(normalText(b))) {
-        return b;
-      }
-    }
-    return null;
   }
 
-  function findFastOption() {
-    const exact = firstVisible(
-      '[data-test-id="bard-mode-option-快速"], [data-test-id="bard-mode-option-Fast"]'
-    );
-    if (exact) return exact;
-
-    const menuItems = Array.from(
+  function findModelItems() {
+    const items = Array.from(
       document.querySelectorAll(
-        '.cdk-overlay-container gem-menu-item[role="menuitem"], .cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="option"]'
+        '[role="menu"] [role^="menuitem"], [role="listbox"] [role="option"], [data-test-id^="bard-mode-option-"]'
       )
-    ).filter((o) => isVisible(o) && !isDisabled(o));
+    ).filter(isVisible);
+    return items.length ? items : null;
+  }
 
-    const flashLite = menuItems.find((o) => {
-      const t = normalText(o);
-      return /Flash-Lite|极速回答/i.test(t);
-    });
-    if (flashLite) return flashLite;
-
-    for (const title of document.querySelectorAll(".cdk-overlay-container .mode-title")) {
-      const t = normalText(title);
-      if (t === "快速" || /^Fast$/i.test(t)) {
-        const option = title.closest('[role="menuitem"], [role="option"], button');
-        if (isVisible(option)) return option;
-      }
-    }
-
-    const opts = menuItems.length
-      ? menuItems
-      : document.querySelectorAll(
-          '.cdk-overlay-container [role="menuitem"], .cdk-overlay-container [role="option"], .cdk-overlay-container mat-option, .cdk-overlay-container button'
-        );
-    for (const o of opts) {
-      const t = normalText(o);
-      if (
-        isVisible(o) &&
-        (t === "快速" || /^Fast(?:\s|$)/i.test(t) || /\bFlash\b/i.test(t))
-      ) {
-        return o;
-      }
+  function choosePreferred(items) {
+    // 当前 UI 的模型项是 role=menuitemradio；“Sign in …”这类推广项只是普通 menuitem，
+    // 文案可能带 “Flash”（点了会跳去登录）。所以有 radio 项时只在 radio 项里选，
+    // 没有 radio 项（旧版菜单）才在所有菜单项里选。
+    const radios = items.filter((el) => el.getAttribute("role") === "menuitemradio");
+    const usable = (radios.length ? radios : items).filter((el) => !isDisabled(el));
+    for (const pattern of MODEL_PREFERENCE) {
+      const hit = usable.find((el) => pattern.test(normalText(el)));
+      if (hit) return hit;
     }
     return null;
   }

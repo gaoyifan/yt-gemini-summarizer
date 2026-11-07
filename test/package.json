@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node run.js"
+    "test": "node run.js",
+    "test:model": "node model-selection.js"
   },
   "keywords": [],
   "author": "",

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "YouTube → Gemini Summarizer",
-  "version": "0.3.0",
-  "description": "右键 YouTube 视频链接，调用 Gemini（快速/Flash 模型）总结视频内容。",
+  "version": "0.3.2",
+  "description": "右键 YouTube 视频链接，调用 Gemini（优先 Flash，不可用时用 Flash-Lite）总结视频内容。",
   "permissions": ["contextMenus", "storage"],
   "host_permissions": ["https://gemini.google.com/*"],
   "background": {
