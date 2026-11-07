@@ -70,7 +70,7 @@
 
 所以模型选择的各条分支另有一个确定性测试 `test/model-selection.js`（`npm run test:model`）：用最小 DOM 夹具（结构和属性照抄真实 Gemini：`bard-mode-switcher` 里的 `.cdk-overlay-popover`、`menuitemradio`、`aria-checked`、锁定项的 `aria-disabled`、带 `popover` 的弹层要 `showPopover()` 才可见）跑真实的 `content.js`，覆盖：当前是 Flash-Lite / Pro → 切到 Flash；已是 Flash → 不误选 Flash-Lite；Flash 被锁定 → 退回 Flash-Lite 且绝不点锁定项，也不点文案里带 Flash 的“Sign in”推广项；没有 Flash；旧版“快速 / Fast”菜单。夹具是按真实 DOM 手工搭的，Gemini 改版后要先对照真实页面更新夹具。
 
-测试使用 `/tmp/yt-gemini-test-profile` 作为独立浏览器 profile。扩展不做登录检测；只要求 Gemini 页面在该 profile 中可用。
+每次运行都会用一个全新的临时浏览器 profile（结束后删除），所以总是以未登录状态测试；扩展本身不做登录检测。
 
 ```bash
 cd test
@@ -97,5 +97,3 @@ handleMenuClick 返回: {"tabId":..., "prompt":"总结视频 https://..."}
 ## 开发说明
 
 修改代码后，到 `chrome://extensions/` 点该扩展卡片右下角的 **重新加载** 图标即可生效。
-
-注意：Playwright persistent context 会缓存 service worker，修改 `background.js` 后如果 e2e 测试看起来跑的是旧代码，删掉 `/tmp/yt-gemini-test-profile` 重跑。

@@ -8,12 +8,11 @@
  */
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { chromium } = require("playwright");
 
 const EXTENSION_DIR = path.resolve(__dirname, "..");
-const PROFILE_DIR = process.env.YT2G_PROFILE_DIR || "/tmp/yt-gemini-test-profile";
-const CHROME_PATH = process.env.CHROME_PATH || "";
 const TEST_VIDEO =
   process.env.YT2G_LINK || "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 const EXPECTED_URL = TEST_VIDEO.startsWith("https://youtu.be/")
@@ -26,78 +25,7 @@ const EXPECTED_PROMPT = `总结视频 ${EXPECTED_URL}`;
 // 偏好 Flash；Flash 被锁定（未登录）时退回 Flash-Lite。Pro / Argon 等一律不接受。
 const ACCEPTED_MODEL = /Flash/i;
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...args) => console.log("[test]", ...args);
-
-async function waitForServiceWorker(context, timeoutMs = 30000, extensionId = null) {
-  const existing = () =>
-    context
-      .serviceWorkers()
-      .find((sw) => sw.url().startsWith("chrome-extension://"));
-  if (existing()) return existing();
-
-  const page = await context.newPage();
-  const deadline = Date.now() + timeoutMs;
-  try {
-    while (Date.now() < deadline) {
-      const sw = existing();
-      if (sw) return sw;
-      if (extensionId) {
-        await page
-          .goto(`chrome-extension://${extensionId}/manifest.json`)
-          .catch(() => {});
-      }
-      const target = await extensionTarget(context, page).catch(() => null);
-      if (target) {
-        const id = new URL(target.url).host;
-        await page.goto(`chrome-extension://${id}/manifest.json`).catch(() => {});
-      }
-      await sleep(500);
-    }
-  } finally {
-    await page.close().catch(() => {});
-  }
-  throw new Error(`扩展 service worker 未在 ${timeoutMs}ms 内出现。`);
-}
-
-async function reloadExtensionIfNeeded(context, sw) {
-  const current = await sw
-    .evaluate(() => ({
-      hasApi: Boolean(self.__yt2gTest && self.__yt2gTest.handleMenuClick),
-      version: chrome.runtime.getManifest().version,
-    }))
-    .catch(() => ({ hasApi: false, version: null }));
-  const expectedVersion = JSON.parse(
-    fs.readFileSync(path.join(EXTENSION_DIR, "manifest.json"), "utf8")
-  ).version;
-  const freshEnough = current.hasApi && current.version === expectedVersion;
-  if (freshEnough) return sw;
-
-  log(
-    `检测到旧版 service worker（当前 ${current.version || "unknown"}，期望 ${expectedVersion}），主动 reload 扩展。`
-  );
-  const extensionId = new URL(sw.url()).host;
-  await sw.evaluate(() => chrome.runtime.reload()).catch(() => {});
-  await sleep(1500);
-
-  const fresh = context
-    .serviceWorkers()
-    .find((worker) => worker.url().startsWith("chrome-extension://"));
-  if (!fresh) return waitForServiceWorker(context, 30000, extensionId);
-  return fresh;
-}
-
-async function extensionTarget(context, page) {
-  const session = await context.newCDPSession(page);
-  try {
-    const { targetInfos } = await session.send("Target.getTargets");
-    return targetInfos.find(
-      (target) => target.url && target.url.startsWith("chrome-extension://")
-    );
-  } finally {
-    await session.detach().catch(() => {});
-  }
-}
 
 async function runHappyPath(sw, context) {
   log("运行 e2e：打开后台 Gemini tab 并提交 prompt。");
@@ -183,16 +111,14 @@ async function currentModelLabel(page) {
 }
 
 async function run() {
-  if (CHROME_PATH && !fs.existsSync(CHROME_PATH)) {
-    throw new Error(`找不到 CHROME_PATH 指定的可执行文件: ${CHROME_PATH}`);
-  }
-  fs.mkdirSync(PROFILE_DIR, { recursive: true });
-
-  const context = await chromium.launchPersistentContext(PROFILE_DIR, launchOptions());
+  // 每次都用全新的临时 profile：没有缓存的旧 service worker，也不带上一次的登录状态。
+  const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "yt2g-e2e-"));
+  const context = await chromium.launchPersistentContext(profileDir, launchOptions());
 
   try {
-    let sw = await waitForServiceWorker(context);
-    sw = await reloadExtensionIfNeeded(context, sw);
+    const sw =
+      context.serviceWorkers()[0] ||
+      (await context.waitForEvent("serviceworker", { timeout: 30000 }));
     log("扩展 service worker:", sw.url());
     await runHappyPath(sw, context);
   } finally {
@@ -201,11 +127,12 @@ async function run() {
       await new Promise(() => {});
     }
     await context.close();
+    fs.rmSync(profileDir, { recursive: true, force: true });
   }
 }
 
 function launchOptions() {
-  const opts = {
+  return {
     headless: false,
     viewport: null,
     userAgent:
@@ -220,8 +147,6 @@ function launchOptions() {
     ],
     ignoreDefaultArgs: ["--enable-automation", "--disable-extensions"],
   };
-  if (CHROME_PATH) opts.executablePath = CHROME_PATH;
-  return opts;
 }
 
 run().catch((err) => {
