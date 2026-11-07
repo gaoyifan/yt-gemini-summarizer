@@ -42,17 +42,8 @@
   }
 
   function findSendButton() {
-    const selectors = [
-      "button.send-button",
-      'gem-icon-button.send-button button',
-      'button[aria-label="发送"]',
-      'button[aria-label="Send"]'
-    ];
-    for (const selector of selectors) {
-      const btn = firstVisible(selector);
-      if (btn && !isDisabled(btn)) return btn;
-    }
-    return null;
+    const btn = firstVisible("gem-icon-button.send-button button");
+    return btn && !isDisabled(btn) ? btn : null;
   }
 
   function insertText(el, text) {
@@ -62,26 +53,9 @@
     const range = document.createRange();
     range.selectNodeContents(el);
     sel.addRange(range);
-    if (document.execCommand("insertText", false, text)) {
-      fireTextInput(el, text);
-      return;
-    }
-    el.innerHTML = "";
-    const p = document.createElement("p");
-    p.textContent = text;
-    el.appendChild(p);
-    fireTextInput(el, text);
-  }
-
-  function fireTextInput(el, text) {
-    el.dispatchEvent(
-      new InputEvent("input", {
-        bubbles: true,
-        inputType: "insertText",
-        data: text
-      })
-    );
-    el.dispatchEvent(new Event("change", { bubbles: true }));
+    // execCommand 会走浏览器原生的编辑流程，自带 beforeinput / input 事件，Quill 能直接感知。
+    // 在真实的隐藏后台标签页（visibilityState=hidden、无焦点）里实测也返回 true。
+    document.execCommand("insertText", false, text);
   }
 
   function isSubmitted(text) {
