@@ -22,8 +22,9 @@ function setupMenus() {
     });
   });
 }
+// MV3 的右键菜单在浏览器重启后依然保留，只需在安装/更新时创建一次。
+// 同时挂 onStartup 会和 onInstalled 并发，导致 “duplicate id” 报错。
 chrome.runtime.onInstalled.addListener(setupMenus);
-chrome.runtime.onStartup.addListener(setupMenus);
 
 function youtubeUrl(raw) {
   try {
